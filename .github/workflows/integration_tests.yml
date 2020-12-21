@@ -1,6 +1,8 @@
 name: CI
 on:
-  # always execute docker build when something is pushed to master or release-* branches
+  pull_request:
+    branches:
+      - '*'
   schedule:
     # * is a special character in YAML so you have to quote this string
     - cron:  '0 3 * * 1-5' # run integration tests at 3 AM, monday to friday (1-5)
@@ -13,35 +15,105 @@ defaults:
     shell: bash
 jobs:
   test-k3s:
-    name: Integration Test on K3s
+    name: Integration Tests
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        K3S_VERSION: ["v1.16.15+k3s1", "v1.19.5+k3s1"] # see https://github.com/rancher/k3s/releases
+        include:
+          - CLOUD_PROVIDER: "minishift-on-GHA"
+            PLATFORM: "openshift"
+            KEPTN_SERVICE_TYPE: "ClusterIP"
+            RUN_CONTINUOUS_DELIVERY_TEST: "false"
+          - CLOUD_PROVIDER: "k3s-on-GHA"
+            K3S_VERSION: "v1.16.15+k3s1" # see https://github.com/rancher/k3s/releases
+            KUBECONFIG: "/etc/rancher/k3s/k3s.yaml"
+            PLATFORM: "kubernetes"
+            KEPTN_SERVICE_TYPE: "NodePort"
+            RUN_CONTINUOUS_DELIVERY_TEST: "false"
+          - CLOUD_PROVIDER: "k3s-on-GHA"
+            K3S_VERSION: "v1.19.5+k3s1" # see https://github.com/rancher/k3s/releases
+            KUBECONFIG: "/etc/rancher/k3s/k3s.yaml"
+            PLATFORM: "kubernetes"
+            KEPTN_SERVICE_TYPE: "NodePort"
+            RUN_CONTINUOUS_DELIVERY_TEST: "false"
+          - CLOUD_PROVIDER: "GKE"
+            GKE_VERSION: "1.15"
+            KUBECONFIG: ""
+            PLATFORM: "kubernetes"
+            KEPTN_SERVICE_TYPE: "LoadBalancer"
+            RUN_CONTINUOUS_DELIVERY_TEST: "true"
+          - CLOUD_PROVIDER: "GKE"
+            GKE_VERSION: "1.17"
+            KUBECONFIG: ""
+            PLATFORM: "kubernetes"
+            KEPTN_SERVICE_TYPE: "LoadBalancer"
+            RUN_CONTINUOUS_DELIVERY_TEST: "true"
     env:
-      PLATFORM: "kubernetes"
-      K3S_VERSION: ${{ matrix.K3S_VERSION }}
-      KUBECONFIG: "/etc/rancher/k3s/k3s.yaml"
+      CLOUD_PROVIDER: ${{ matrix.CLOUD_PROVIDER }}
+      PLATFORM: ${{ matrix.PLATFORM }}
+      KUBECONFIG: ${{ matrix.KUBECONFIG }}
       KEPTN_NAMESPACE: "keptn-test"
-      KEPTN_SERVICE_TYPE: "NodePort"
+      KEPTN_SERVICE_TYPE: ${{ matrix.KEPTN_SERVICE_TYPE }}
+      RUN_CONTINUOUS_DELIVERY_TEST: ${{ matrix.RUN_CONTINUOUS_DELIVERY_TEST }}
     steps:
       - name: Check out code.
         uses: actions/checkout@v2
+
+      # setup cloud provider kubernetes instance
+      - name: Install and start Minishift
+        if: env.CLOUD_PROVIDER == 'minishift-on-GHA'
+        run: |
+          test/utils/download_and_install_oc_cli.sh
+          test/utils/minishift_create_cluster.sh
       - name: Install and start K3s
+        if: env.CLOUD_PROVIDER == 'k3s-on-GHA'
+        env:
+          K3S_VERSION: ${{ matrix.K3S_VERSION }}
         run: test/utils/k3s_create_cluster.sh
+      - name: Install and start GKE cluster
+        if: env.CLOUD_PROVIDER == 'GKE'
+        env:
+          GKE_VERSION: ${{ matrix.GKE_VERSION }}
+          GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
+          GCLOUD_PROJECT_NAME: ${{ secrets.GCLOUD_PROJECT_NAME }}
+          CLOUDSDK_COMPUTE_ZONE: "us-central1-a"
+          CLOUDSDK_REGION: "us-central1"
+        id: install_gke
+        run: |
+          CLUSTER_NAME_NIGHTLY=gh-nightly
+          BRANCH_SLUG=master
+          export CLUSTER_NAME_NIGHTLY=${CLUSTER_NAME_NIGHTLY}-${BRANCH_SLUG:0:15}-gke${GKE_VERSION//./}
+          echo $CLUSTER_NAME_NIGHTLY
+          echo "Installing gcloud CLI"
+          export OS_TYPE="linux"
+          source ./travis-scripts/install_gcloud.sh
+          echo ${GCLOUD_SERVICE_KEY} | base64 --decode > ~/gcloud-service-key.json
+          gcloud auth activate-service-account --key-file ~/gcloud-service-key.json
+          test/utils/gke_create_cluster.sh
+          test/utils/gke_authenticate_at_cluster.sh
+
+          echo "##[set-output name=CLUSTER_NAME_NIGHTLY;]$(echo ${CLUSTER_NAME_NIGHTLY})"
+      # get some debug infos
       - name: Debug - Describe Kubernetes Nodes
         run: kubectl describe nodes
       - name: Install Istio
+        if: env.CLOUD_PROVIDER != 'minishift-on-GHA' # no need to install istio on minishift
         run: test/utils/install_istio.sh
 
       # Print some Kubernetes Debug Output
+      - name: Debug - Minishift status
+        if: env.CLOUD_PROVIDER == 'minishift-on-GHA'
+        run: oc status
+      - name: Debug - Minishift routes
+        if: env.CLOUD_PROVIDER == 'minishift-on-GHA'
+        run: oc get routes --all-namespaces
       - name: Debug - Get Kubernetes namespaces
         run: kubectl get namespaces
       - name: Debug - Get Kubernetes services
         run: kubectl get services --all-namespaces
       - name: Debug - Get Kubernetes Deployments
         run: kubectl get deployments --all-namespaces -owide
-
       - name: Download CLI artifact from master branch
         uses: dawidd6/action-download-artifact@v2
         with:
@@ -79,18 +151,48 @@ jobs:
       - name: Host helm chart via python http server
         run: cd dist/keptn-installer/ && python3 -m http.server &
 
-      - name: Install Keptn on K3s
+      - name: Install Keptn
         env:
           HELM_CHART_NAME: ${{ steps.extract_helm_chart_name.outputs.HELM_CHART_NAME }}
         run: |
           echo "Installing Keptn on cluster"
-          echo "{}" > creds.json # empty credentials file
+
+          if [[ $PLATFORM == "openshift" ]]; then
+            echo "{
+              \"openshiftUrl\": \"https://127.0.0.1:8443\",
+              \"openshiftUser\": \"admin\",
+              \"openshiftPassword\": \"admin\"
+            }" > creds.json
+          else
+            echo "{}" > creds.json # empty credentials file
+          fi
 
           # install Keptn using the develop version, which refers to the :latest docker images
           keptn install --platform=${PLATFORM} --namespace=${KEPTN_NAMESPACE} --endpoint-service-type=${KEPTN_SERVICE_TYPE} \
              --chart-repo=http://0.0.0.0:8000/${HELM_CHART_NAME} --creds=creds.json --verbose --use-case=continuous-delivery
 
+      - name: Expose Keptn API (Minishift)
+        if: env.CLOUD_PROVIDER == 'minishift-on-GHA'
+        run: oc expose svc/api-gateway-nginx -n ${KEPTN_NAMESPACE} --hostname=api.${KEPTN_NAMESPACE}.127.0.0.1.nip.io
+
+      - name: Expose Deployed Services via Istio
+        if: env.RUN_CONTINUOUS_DELIVERY_TEST == 'true'
+        run: |
+          # set ingress-hostname params
+          INGRESS_IP=$(kubectl -n istio-system get service istio-ingressgateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          echo "INGRESS_IP=$INGRESS_IP"
+          kubectl create configmap -n keptn ingress-config --from-literal=ingress_hostname_suffix=${INGRESS_IP}.xip.io --from-literal=ingress_port=80 --from-literal=ingress_protocol=http --from-literal=ingress_gateway=public-gateway.istio-system -oyaml --dry-run | kubectl replace -f -
+
+          kubectl delete pod -n ${KEPTN_NAMESPACE} -lapp.kubernetes.io/name=helm-service
+          sleep 15
+
       # Print some Kubernetes Debug Output
+      - name: Debug - Minishift status
+        if: env.CLOUD_PROVIDER == 'minishift-on-GHA'
+        run: oc status
+      - name: Debug - Minishift routes
+        if: env.CLOUD_PROVIDER == 'minishift-on-GHA'
+        run: oc get routes --all-namespaces
       - name: Debug - Get Kubernetes namespaces
         run: kubectl get namespaces
       - name: Debug - Get Kubernetes services
@@ -174,7 +276,24 @@ jobs:
           DYNATRACE_SLI_SERVICE_VERSION: "master"
         run: test/test_delivery_assistant.sh
 
+      - name: Test Continuous Delivery (with sockshop)
+        if: env.RUN_CONTINUOUS_DELIVERY_TEST == 'true'
+        env:
+          KEPTN_ENDPOINT: ${{ steps.authenticate_keptn_cli.outputs.KEPTN_ENDPOINT }}
+          PROJECT: "sockshop"
+          SERVICE: "carts"
+        run: |
+          test/test_onboard_service.sh
+          test/test_new_artifact.sh
+          test/test_delete_project.sh
+
       # All Tests finished, time for cleanup
+      - name: Debug - Minishift status
+        if: env.CLOUD_PROVIDER == 'minishift-on-GHA'
+        run: oc status
+      - name: Debug - Minishift routes
+        if: env.CLOUD_PROVIDER == 'minishift-on-GHA'
+        run: oc get routes --all-namespaces
       - name: Debug - Get Kubernetes namespaces
         run: kubectl get namespaces
       - name: Debug - Get Kubernetes services
@@ -187,9 +306,36 @@ jobs:
       - name: Uninstall Keptn
         run: echo "y" | keptn uninstall -n ${KEPTN_NAMESPACE}
 
+      - name: Uninstall Istio
+        if: env.CLOUD_PROVIDER != 'minishift-on-GHA' # istio was not installed on minishfit, so no need to uninstall
+        run: test/utils/uninstall_istio.sh
+
+      # one last time: debug infos
+      - name: Debug - Minishift status
+        if: env.CLOUD_PROVIDER == 'minishift-on-GHA'
+        run: oc status
+      - name: Debug - Minishift routes
+        if: env.CLOUD_PROVIDER == 'minishift-on-GHA'
+        run: oc get routes --all-namespaces
       - name: Debug - Get Kubernetes namespaces
         run: kubectl get namespaces
       - name: Debug - Get Kubernetes services
         run: kubectl get services --all-namespaces
       - name: Debug - Get Kubernetes Deployments
         run: kubectl get deployments --all-namespaces -owide
+
+      - name: Cleanup GKE cluster
+        if: env.CLOUD_PROVIDER == 'GKE'
+        env:
+          GKE_VERSION: ${{ matrix.GKE_VERSION }}
+          GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
+          GCLOUD_PROJECT_NAME: ${{ secrets.GCLOUD_PROJECT_NAME }}
+          CLOUDSDK_COMPUTE_ZONE: "us-central1-a"
+          CLOUDSDK_REGION: "us-central1"
+        run: test/utils/gke_delete_cluster.sh
+
+      - name: Cleanup Minishift cluster
+        if: env.CLOUD_PROVIDER == 'minishift-on-GHA'
+        run: |
+          minishift stop
+          minishift delete profile keptn-dev

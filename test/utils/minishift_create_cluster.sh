@@ -17,7 +17,7 @@ chmod g-rw,o-rw /root/.ssh /root/.ssh/* $USSH/* $USSH
 EOF
 
 # download and install minishift
-MINISHIFT_VERSION=1.34.2
+MINISHIFT_VERSION=1.34.3
 MINISHIFT_FILENAME=minishift-${MINISHIFT_VERSION}-linux-amd64
 
 curl -Lo minishift.tgz https://github.com/minishift/minishift/releases/download/v${MINISHIFT_VERSION}/${MINISHIFT_FILENAME}.tgz
