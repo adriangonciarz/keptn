@@ -3,10 +3,19 @@
 source test/utils.sh
 
 function cleanup() {
+  # print logs of dynatrace-sli-service
+  echo "Logs from: dynatrace-sli-service"
+  kubectl -n ${KEPTN_NAMESPACE} logs svc/dynatrace-sli-service -c dynatrace-sli-service
+  echo "Logs from: lighthouse-service"
+  kubectl -n ${KEPTN_NAMESPACE} logs svc/lighthouse-service -c lighthouse-service
+
   echo "Executing cleanup..."
 
   echo "Delete lighthouse-config configmap"
   kubectl delete configmap -n ${KEPTN_NAMESPACE} lighthouse-config
+
+  echo "Delete lighthouse-config-$PROJECT configmap"
+  kubectl delete configmap -n ${KEPTN_NAMESPACE} lighthouse-config-${PROJECT}
 
   echo "Deleting project ${PROJECT}"
   keptn delete project $PROJECT
@@ -16,6 +25,12 @@ function cleanup() {
 
   echo "Removing secret dynatrace-credentials-${PROJECT}"
   kubectl -n ${KEPTN_NAMESPACE} delete secret dynatrace-credentials-${PROJECT}
+
+  # print logs of dynatrace-sli-service
+  echo "Logs from: dynatrace-sli-service"
+  kubectl -n ${KEPTN_NAMESPACE} logs svc/dynatrace-sli-service -c dynatrace-sli-service
+  echo "Logs from: lighthouse-service"
+  kubectl -n ${KEPTN_NAMESPACE} logs svc/lighthouse-service -c lighthouse-service
 }
 trap cleanup EXIT SIGINT
 
@@ -23,6 +38,7 @@ trap cleanup EXIT SIGINT
 DYNATRACE_SLI_SERVICE_VERSION=${DYNATRACE_SLI_SERVICE_VERSION:-master}
 KEPTN_EXAMPLES_BRANCH=${KEPTN_EXAMPLES_BRANCH:-master}
 PROJECT=${PROJECT:-easytravel}
+SERVICE=${SERVICE:-frontend}
 KEPTN_NAMESPACE=${KEPTN_NAMESPACE:-keptn}
 
 KEPTN_API_TOKEN=$(kubectl get secret keptn-api-token -n ${KEPTN_NAMESPACE} -ojsonpath={.data.keptn-api-token} | base64 --decode)
@@ -88,7 +104,7 @@ fi
 ###########################################
 # create service frontend                 #
 ###########################################
-SERVICE=frontend
+
 keptn create service $SERVICE --project=$PROJECT
 verify_test_step $? "keptn create service ${SERVICE} - failed"
 
@@ -146,8 +162,8 @@ echo "Sending start-evaluation event for service $SERVICE in stage hardening"
 keptn_context_id=$(send_start_evaluation_event $PROJECT hardening $SERVICE)
 sleep 10
 
-# try to fetch a evaluation-done event
-echo "Getting evaluation-done event with context-id: ${keptn_context_id}"
+# try to fetch a evaluation.finished event
+echo "Getting evaluation.finished event with context-id: ${keptn_context_id}"
 response=$(get_event sh.keptn.event.evaluation.finished ${keptn_context_id} ${PROJECT})
 
 # print the response
@@ -214,8 +230,8 @@ echo "Sending start-evaluation event for service $SERVICE in stage hardening"
 keptn_context_id=$(send_start_evaluation_event $PROJECT hardening $SERVICE)
 sleep 10
 
-# try to fetch a evaluation-done event
-echo "Getting evaluation-done event with context-id: ${keptn_context_id}"
+# try to fetch a evaluation.finished event
+echo "Getting evaluation.finished event with context-id: ${keptn_context_id}"
 response=$(get_event sh.keptn.event.evaluation.finished ${keptn_context_id} ${PROJECT})
 
 # print the response
@@ -260,35 +276,34 @@ echo "Sending start-evaluation event for service $SERVICE in stage hardening"
 keptn_context_id=$(send_start_evaluation_event $PROJECT hardening $SERVICE)
 sleep 30
 
-# wait until a evaluation-done event is retrieved
-echo "Trying to get evaluation-done event with context-id: ${keptn_context_id}"
+# wait until a evaluation.finished event is retrieved
+echo "Trying to get evaluation.finished event with context-id: ${keptn_context_id}"
 
 RETRY=0; RETRY_MAX=30;
 
 while [[ $RETRY -lt $RETRY_MAX ]]; do
-  # try to fetch the evaluation-done event
+  # try to fetch the evaluation.finished event
   response=$(get_event sh.keptn.event.evaluation.finished ${keptn_context_id} ${PROJECT})
 
   # check if this contains an error
   echo $response | grep "No event returned"
 
   if [[ $? -ne 0 ]]; then
-    echo "Received an evaluation-done event, continue ..."
+    echo "Received an evaluation.finished event, continue ..."
     break
   else
     RETRY=$[$RETRY+1]
-    echo "Retry: ${RETRY}/${RETRY_MAX} - Wait 10s for evaluation-done event"
+    echo "Retry: ${RETRY}/${RETRY_MAX} - Wait 10s for evaluation.finished event"
     sleep 10
   fi
 done
 
 if [[ $RETRY == $RETRY_MAX ]]; then
-  kubectl -n ${KEPTN_NAMESPACE} logs svc/dynatrace-sli-service -c dynatrace-sli-service
-  print_error "evaluation-done event could not be retrieved"
+  print_error "evaluation.finished event could not be retrieved"
   # exit 1 - Todo - see below
 fi
 
-# okay, evaluation-done event retrieved, parse it
+# okay, evaluation.finished event retrieved, parse it
 echo $response | jq .
 
 # validate the response
@@ -311,39 +326,34 @@ kubectl -n ${KEPTN_NAMESPACE} create secret generic dynatrace-credentials-${PROJ
 keptn_context_id=$(send_start_evaluation_event $PROJECT hardening $SERVICE)
 sleep 30
 
-# wait until a evaluation-done event is retrieved
-echo "Trying to get evaluation-done event with context-id: ${keptn_context_id}"
+# wait until a evaluation.finished event is retrieved
+echo "Trying to get evaluation.finished event with context-id: ${keptn_context_id}"
 
 RETRY=0; RETRY_MAX=30;
 
 while [[ $RETRY -lt $RETRY_MAX ]]; do
-  # try to fetch the evaluation-done event
+  # try to fetch the evaluation.finished event
   response=$(get_event sh.keptn.event.evaluation.finished ${keptn_context_id} ${PROJECT})
 
   # check if this contains an error
   echo $response | grep "No event returned"
 
   if [[ $? -ne 0 ]]; then
-    echo "Received an evaluation-done event, continue ..."
+    echo "Received an evaluation.finished event, continue ..."
     break
   else
     RETRY=$[$RETRY+1]
-    echo "Retry: ${RETRY}/${RETRY_MAX} - Wait 10s for evaluation-done event"
+    echo "Retry: ${RETRY}/${RETRY_MAX} - Wait 10s for evaluation.finished event"
     sleep 10
   fi
 done
 
 if [[ $RETRY == $RETRY_MAX ]]; then
-  # print logs of dynatrace-sli-service
-  echo "Logs from: dynatrace-sli-service"
-  kubectl -n ${KEPTN_NAMESPACE} logs svc/dynatrace-sli-service -c dynatrace-sli-service
-  echo "Logs from: lighthouse-service"
-  kubectl -n ${KEPTN_NAMESPACE} logs svc/lighthouse-service -c lighthouse-service
-  print_error "evaluation-done event could not be retrieved"
+  print_error "evaluation.finished event could not be retrieved"
   exit 1
 fi
 
-# okay, evaluation-done event retrieved, parse it
+# okay, evaluation.finished event retrieved, parse it
 echo $response | jq .
 
 # validate the response
@@ -393,36 +403,34 @@ sleep 30
 keptn_context_id=$(send_start_evaluation_event $PROJECT hardening $SERVICE)
 sleep 30
 
-# wait until a evaluation-done event is retrieved
-echo "Trying to get evaluation-done event with context-id: ${keptn_context_id}"
+# wait until a evaluation.finished event is retrieved
+echo "Trying to get evaluation.finished event with context-id: ${keptn_context_id}"
 
 RETRY=0; RETRY_MAX=30;
 
 while [[ $RETRY -lt $RETRY_MAX ]]; do
-  # try to fetch the evaluation-done event
+  # try to fetch the evaluation.finished event
   response=$(get_event sh.keptn.event.evaluation.finished ${keptn_context_id} ${PROJECT})
 
   # check if this contains an error
   echo $response | grep "No event returned"
 
   if [[ $? -ne 0 ]]; then
-    echo "Received an evaluation-done event, continue ..."
+    echo "Received an evaluation.finished event, continue ..."
     break
   else
     RETRY=$[$RETRY+1]
-    echo "Retry: ${RETRY}/${RETRY_MAX} - Wait 10s for evaluation-done event"
+    echo "Retry: ${RETRY}/${RETRY_MAX} - Wait 10s for evaluation.finished event"
     sleep 10
   fi
 done
 
 if [[ $RETRY == $RETRY_MAX ]]; then
-  # print logs of dynatrace-sli-service
-  kubectl -n ${KEPTN_NAMESPACE} logs svc/dynatrace-sli-service -c dynatrace-sli-service
-  print_error "evaluation-done event could not be retrieved"
+  print_error "evaluation.finished event could not be retrieved"
   exit 1
 fi
 
-# okay, evaluation-done event retrieved, parse it
+# okay, evaluation.finished event retrieved, parse it
 echo $response | jq .
 
 # validate the response
@@ -474,36 +482,34 @@ verify_test_step $? "keptn add-resource slo.yaml - failed"
 keptn_context_id=$(send_start_evaluation_event $PROJECT hardening $SERVICE)
 sleep 30
 
-# wait until a evaluation-done event is retrieved
-echo "Trying to get evaluation-done event with context-id: ${keptn_context_id}"
+# wait until a evaluation.finished event is retrieved
+echo "Trying to get evaluation.finished event with context-id: ${keptn_context_id}"
 
 RETRY=0; RETRY_MAX=30;
 
 while [[ $RETRY -lt $RETRY_MAX ]]; do
-  # try to fetch the evaluation-done event
+  # try to fetch the evaluation.finished event
   response=$(get_event sh.keptn.event.evaluation.finished ${keptn_context_id} ${PROJECT})
 
   # check if this contains an error
   echo $response | grep "No event returned"
 
   if [[ $? -ne 0 ]]; then
-    echo "Received an evaluation-done event, continue ..."
+    echo "Received an evaluation.finished event, continue ..."
     break
   else
     RETRY=$[$RETRY+1]
-    echo "Retry: ${RETRY}/${RETRY_MAX} - Wait 10s for evaluation-done event"
+    echo "Retry: ${RETRY}/${RETRY_MAX} - Wait 10s for evaluation.finished event"
     sleep 10
   fi
 done
 
 if [[ $RETRY == $RETRY_MAX ]]; then
-  # print logs of dynatrace-sli-service
-  kubectl -n ${KEPTN_NAMESPACE} logs svc/dynatrace-sli-service -c dynatrace-sli-service
-  print_error "evaluation-done event could not be retrieved"
+  print_error "evaluation.finished event could not be retrieved"
   exit 1
 fi
 
-# okay, evaluation-done event retrieved, parse it
+# okay, evaluation.finished event retrieved, parse it
 echo $response | jq .
 
 # validate the response
@@ -557,36 +563,34 @@ verify_test_step $? "keptn add-resource sli.yaml - failed"
 keptn_context_id=$(send_start_evaluation_event $PROJECT hardening $SERVICE)
 sleep 30
 
-# wait until a evaluation-done event is retrieved
-echo "Trying to get evaluation-done event with context-id: ${keptn_context_id}"
+# wait until a evaluation.finished event is retrieved
+echo "Trying to get evaluation.finished event with context-id: ${keptn_context_id}"
 
 RETRY=0; RETRY_MAX=30;
 
 while [[ $RETRY -lt $RETRY_MAX ]]; do
-  # try to fetch the evaluation-done event
+  # try to fetch the evaluation.finished event
   response=$(get_event sh.keptn.event.evaluation.finished ${keptn_context_id} ${PROJECT})
 
   # check if this contains an error
   echo $response | grep "No event returned"
 
   if [[ $? -ne 0 ]]; then
-    echo "Received an evaluation-done event, continue ..."
+    echo "Received an evaluation.finished event, continue ..."
     break
   else
     RETRY=$[$RETRY+1]
-    echo "Retry: ${RETRY}/${RETRY_MAX} - Wait 10s for evaluation-done event"
+    echo "Retry: ${RETRY}/${RETRY_MAX} - Wait 10s for evaluation.finished event"
     sleep 10
   fi
 done
 
 if [[ $RETRY == $RETRY_MAX ]]; then
-  # print logs of dynatrace-sli-service
-  kubectl -n ${KEPTN_NAMESPACE} logs svc/dynatrace-sli-service -c dynatrace-sli-service
-  print_error "evaluation-done event could not be retrieved"
+  print_error "evaluation.finished event could not be retrieved"
   exit 1
 fi
 
-# okay, evaluation-done event retrieved, parse it
+# okay, evaluation.finished event retrieved, parse it
 echo $response | jq .
 
 # validate the response
@@ -641,8 +645,8 @@ verify_test_step $? "keptn add-resource slo.yaml - failed"
 first_keptn_context_id=$(send_start_evaluation_event $PROJECT hardening $SERVICE)
 sleep 10
 
-# try to fetch a evaluation-done event
-echo "Getting evaluation-done event with context-id: ${first_keptn_context_id}"
+# try to fetch a evaluation.finished event
+echo "Getting evaluation.finished event with context-id: ${first_keptn_context_id}"
 response=$(get_event sh.keptn.event.evaluation.finished ${first_keptn_context_id} ${PROJECT})
 
 # print the response
@@ -661,8 +665,8 @@ first_event_id=$(echo "${response}" | jq -r ".id")
 second_keptn_context_id=$(send_start_evaluation_event $PROJECT hardening $SERVICE)
 sleep 10
 
-# try to fetch a evaluation-done event
-echo "Getting evaluation-done event with context-id: ${second_keptn_context_id}"
+# try to fetch a evaluation.finished event
+echo "Getting evaluation.finished event with context-id: ${second_keptn_context_id}"
 response=$(get_event sh.keptn.event.evaluation.finished ${second_keptn_context_id} ${PROJECT})
 
 # print the response
@@ -686,8 +690,8 @@ sleep 10
 third_keptn_context_id=$(send_start_evaluation_event $PROJECT hardening $SERVICE)
 sleep 10
 
-# try to fetch a evaluation-done event
-echo "Getting evaluation-done event with context-id: ${third_keptn_context_id}"
+# try to fetch a evaluation.finished event
+echo "Getting evaluation.finished event with context-id: ${third_keptn_context_id}"
 response=$(get_event sh.keptn.event.evaluation.finished ${third_keptn_context_id} ${PROJECT})
 
 # print the response

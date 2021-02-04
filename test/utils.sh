@@ -53,9 +53,9 @@ function send_start_evaluation_event() {
   echo "$keptn_context_id"
 }
 
-function get_evaluation_done_event() {
+function get_evaluation_finished_event() {
   keptn_context_id=$1
-  keptn get event evaluation-done --keptn-context="${keptn_context_id}" 2>/dev/null | tail -n +5
+  keptn get event evaluation.finished --keptn-context="${keptn_context_id}" 2>/dev/null | tail -n +5
 }
 
 function get_event() {
@@ -103,21 +103,6 @@ function send_approval_triggered_event() {
 
   response=$(keptn send event --file=tmp_approval_triggered_event.json)
   rm tmp_approval_triggered_event.json
-
-  keptn_context_id=$(echo $response | awk -F'Keptn context:' '{ print $2 }' | xargs)
-  echo "$keptn_context_id"
-}
-
-function send_evaluation_done_event() {
-  PROJECT=$1
-  STAGE=$2
-  SERVICE=$3
-  RESULT=$4
-
-  cat ./test/assets/evaluation_done_event_template.json | jq -r --arg project $PROJECT --arg stage $STAGE --arg service $SERVICE --arg result $RESULT '.data.project=$project | .data.stage=$stage | .data.service=$service | .data.result=$result' > tmp_evaluation_done_event.json
-
-  response=$(keptn send event --file=tmp_evaluation_done_event.json)
-  rm tmp_evaluation_done_event.json
 
   keptn_context_id=$(echo $response | awk -F'Keptn context:' '{ print $2 }' | xargs)
   echo "$keptn_context_id"
@@ -241,7 +226,7 @@ function verify_test_step() {
 
 function wait_for_url() {
   URL=$1
-  RETRY=0; RETRY_MAX=50;
+  RETRY=0; RETRY_MAX=40;
 
   while [[ $RETRY -lt $RETRY_MAX ]]; do
     curl $URL -k
@@ -277,7 +262,7 @@ function verify_image_of_deployment() {
 
 function wait_for_deployment_in_namespace() {
   DEPLOYMENT=$1; NAMESPACE=$2;
-  RETRY=0; RETRY_MAX=50;
+  RETRY=0; RETRY_MAX=40;
 
   while [[ $RETRY -lt $RETRY_MAX ]]; do
     DEPLOYMENT_LIST=$(eval "kubectl get deployments -n ${NAMESPACE} | awk '/$DEPLOYMENT /'" | awk '{print $1}') # list of multiple deployments when starting with the same name
@@ -308,7 +293,7 @@ function wait_for_deployment_in_namespace() {
 
 function wait_for_deployment_with_image_in_namespace() {
   DEPLOYMENT=$1; NAMESPACE=$2;  IMAGE=$3
-  RETRY=0; RETRY_MAX=50;
+  RETRY=0; RETRY_MAX=40;
 
   while [[ $RETRY -lt $RETRY_MAX ]]; do
     DEPLOYMENT_IMAGE=$(eval kubectl get deployment $DEPLOYMENT -n $NAMESPACE -o=jsonpath='{$.spec.template.spec.containers[:1].image}' --ignore-not-found)
@@ -338,7 +323,7 @@ function wait_for_deployment_with_image_in_namespace() {
 
 function wait_for_pod_number_in_deployment_in_namespace() {
   DEPLOYMENT=$1; POD_COUNT=$2; NAMESPACE=$3;
-  RETRY=0; RETRY_MAX=50;
+  RETRY=0; RETRY_MAX=40;
 
   while [[ $RETRY -lt $RETRY_MAX ]]; do
     DEPLOYMENT_LIST=$(eval "kubectl get deployments -n ${NAMESPACE} | awk '/$DEPLOYMENT /'" | awk '{print $1}') # list of multiple deployments when starting with the same name
@@ -367,7 +352,7 @@ function wait_for_pod_number_in_deployment_in_namespace() {
 
 function wait_for_daemonset_in_namespace() {
   DAEMONSET=$1; NAMESPACE=$2;
-  RETRY=0; RETRY_MAX=50;
+  RETRY=0; RETRY_MAX=40;
 
   while [[ $RETRY -lt $RETRY_MAX ]]; do
     DAEMONSET_LIST=$(eval "kubectl get daemonset -n ${NAMESPACE} | awk '/$DAEMONSET /'" | awk '{print $1}')

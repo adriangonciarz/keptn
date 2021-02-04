@@ -1,5 +1,5 @@
-import {ChangeDetectorRef, Component, OnDestroy, OnInit, ViewChild} from '@angular/core';
-import {filter, map, startWith, switchMap, takeUntil} from "rxjs/operators";
+import {ChangeDetectorRef, Component, OnDestroy, OnInit} from '@angular/core';
+import {filter, map, startWith, switchMap, take, takeUntil} from "rxjs/operators";
 import {Observable, Subject, Subscription, timer} from "rxjs";
 import {ActivatedRoute, Router} from "@angular/router";
 import {Location} from "@angular/common";
@@ -12,14 +12,12 @@ import {Project} from "../_models/project";
 import {DataService} from "../_services/data.service";
 import {ApiService} from "../_services/api.service";
 import DateUtil from "../_utils/date.utils";
-import {Service} from "../_models/service";
 import {Trace} from "../_models/trace";
-import {Stage} from "../_models/stage";
 import {DtCheckboxChange} from "@dynatrace/barista-components/checkbox";
 import {EVENT_LABELS} from "../_models/event-labels";
-import {DtOverlayConfig} from "@dynatrace/barista-components/overlay";
-import {DtToggleButtonItem} from "@dynatrace/barista-components/toggle-button-group";
 import {ClipboardService} from "../_services/clipboard.service";
+import {DtQuickFilterDefaultDataSource, DtQuickFilterDefaultDataSourceConfig} from "@dynatrace/barista-components/experimental/quick-filter";
+import {isObject} from "@dynatrace/barista-components/core";
 
 @Component({
   selector: 'app-project-board',
@@ -30,11 +28,12 @@ export class ProjectBoardComponent implements OnInit, OnDestroy {
 
   private readonly unsubscribe$ = new Subject<void>();
   private _tracesTimer: Subscription = Subscription.EMPTY;
+  private _sequencesTimer: Subscription = Subscription.EMPTY;
 
   public project$: Observable<Project>;
-  public openApprovals$: Observable<Trace[]>;
 
   public currentRoot: Root;
+  public currentSequence: Root;
   public error: string = null;
 
   private _rootEventsTimerInterval = 30;
@@ -46,12 +45,9 @@ export class ProjectBoardComponent implements OnInit, OnDestroy {
   public eventId: string;
 
   public view: string = 'services';
-  public selectedStage: Stage = null;
 
   public eventTypes: string[] = [];
   public filterEventTypes: string[] = [];
-
-  public filterEventType: string = null;
 
   public integrationsExternalDetails = null;
 
@@ -60,16 +56,46 @@ export class ProjectBoardComponent implements OnInit, OnDestroy {
     'api': []
   };
 
+  /** configuration for the quick filter */
+  private filterFieldData = {
+    autocomplete: [
+      {
+        name: 'Service',
+        showInSidebar: true,
+        autocomplete: [],
+      }, {
+        name: 'Stage',
+        showInSidebar: true,
+        autocomplete: [],
+      }, {
+        name: 'Sequence',
+        showInSidebar: true,
+        autocomplete: [
+        ],
+      }, {
+        name: 'Status',
+        showInSidebar: true,
+        autocomplete: [
+          { name: 'Active', value: 'active' },
+          { name: 'Failed', value: 'failed' },
+          { name: 'Succeeded', value: 'succeeded' },
+        ],
+      },
+    ],
+  };
+  private _config: DtQuickFilterDefaultDataSourceConfig = {
+    // Method to decide if a node should be displayed in the quick filter
+    showInSidebar: (node) => isObject(node) && node.showInSidebar,
+  };
+  public _filterDataSource = new DtQuickFilterDefaultDataSource(
+    this.filterFieldData,
+    this._config,
+  );
+  public _seqFilters = [];
+  private sequenceFilters = {};
+
   public keptnInfo: any;
   public currentTime: String;
-
-  @ViewChild('problemFilterEventButton') public problemFilterEventButton: DtToggleButtonItem<string>;
-  @ViewChild('evaluationFilterEventButton') public evaluationFilterEventButton: DtToggleButtonItem<string>;
-  @ViewChild('approvalFilterEventButton') public approvalFilterEventButton: DtToggleButtonItem<string>;
-
-  public overlayConfig: DtOverlayConfig = {
-    pinnable: true
-  };
 
   constructor(private _changeDetectorRef: ChangeDetectorRef, private router: Router, private location: Location, private route: ActivatedRoute, private dataService: DataService, private apiService: ApiService, private clipboard: ClipboardService) { }
 
@@ -117,7 +143,7 @@ export class ProjectBoardComponent implements OnInit, OnDestroy {
               return project.projectName === params['projectName'];
             }) : null)
           );
-          this.openApprovals$ = this.dataService.openApprovals;
+
 
           this.project$
             .pipe(takeUntil(this.unsubscribe$))
@@ -139,6 +165,21 @@ export class ProjectBoardComponent implements OnInit, OnDestroy {
               }
               if(this.currentRoot && !this.eventId)
                 this.eventId = this.currentRoot.traces[this.currentRoot.traces.length-1].id;
+
+              this.project$
+                .pipe(
+                  filter(project => !!project && !!project.getServices() && !!project.stages && !!project.sequences),
+                  take(1)
+                ).subscribe(project => {
+                  this.filterFieldData.autocomplete.find(f => f.name == 'Service').autocomplete = project.services.map(s => Object.assign({}, { name: s.serviceName, value: s.serviceName }));
+                  this.filterFieldData.autocomplete.find(f => f.name == 'Stage').autocomplete = project.stages.map(s => Object.assign({}, { name: s.stageName, value: s.stageName }));
+                  this.filterFieldData.autocomplete.find(f => f.name == 'Sequence').autocomplete = project.sequences.map(s => s.getShortType()).filter((v, i, a) => a.indexOf(v) === i).map(seqName => Object.assign({}, { name: seqName, value: seqName }))
+
+                  this._filterDataSource = new DtQuickFilterDefaultDataSource(
+                    this.filterFieldData,
+                    this._config,
+                  );
+                });
             });
 
           timer(0, this._rootEventsTimerInterval*1000)
@@ -151,9 +192,7 @@ export class ProjectBoardComponent implements OnInit, OnDestroy {
             .subscribe(project => {
               this.updateIntegrations();
               this.dataService.loadServices(project);
-              project.getServices().forEach(service => {
-                this.dataService.loadRoots(project, service);
-              });
+              this.dataService.loadRoots(project);
             });
         }
       });
@@ -210,7 +249,7 @@ export class ProjectBoardComponent implements OnInit, OnDestroy {
       label: 'Trigger deployment with a new artifact',
       code: `curl -X POST "\${KEPTN_API_ENDPOINT}/v1/event" \\
       -H "accept: application/json; charset=utf-8" -H "x-token: \${KEPTN_API_TOKEN}" -H "Content-Type: application/json; charset=utf-8" \\
-      -d "{"type":"sh.keptn.event.configuration.change","specversion":"0.2","source":"api","contenttype":"application\\/json","data":{"project":"\${PROJECT}","stage":"\${STAGE}","service":"\${SERVICE}","valuesCanary":{"image":"\${IMAGE}"}}}"`
+      -d "{"type":"sh.keptn.event.configuration.change","specversion":"0.2","source":"api","contenttype":"application\\/json","data":{"project":"\${PROJECT}","stage":"\${STAGE}","service":"\${SERVICE}","configurationChange":{"values":{"image":"\${IMAGE}"}}}}"`
     });
   }
 
@@ -248,6 +287,11 @@ export class ProjectBoardComponent implements OnInit, OnDestroy {
     this.loadTraces(this.currentRoot);
   }
 
+  selectSequence(event: any): void {
+    this.currentSequence = event.root;
+    this.loadTraces(this.currentSequence);
+  }
+
   selectDeployment(deployment: Trace, project: Project) {
     this.selectRoot({
       root: project.getServices().find(service => service.serviceName === deployment.data.service).roots.find(root => root.shkeptncontext === deployment.shkeptncontext),
@@ -272,8 +316,8 @@ export class ProjectBoardComponent implements OnInit, OnDestroy {
     return DateUtil.getCalendarFormats(true);
   }
 
-  getRootsLastUpdated(project: Project, service: Service): Date {
-    return this.dataService.getRootsLastUpdated(project, service);
+  getRootsLastUpdated(project: Project): Date {
+    return this.dataService.getRootsLastUpdated(project);
   }
 
   getTracesLastUpdated(root: Root): Date {
@@ -288,12 +332,15 @@ export class ProjectBoardComponent implements OnInit, OnDestroy {
     this.dataService.loadProjects();
   }
 
-  trackStage(index: number, stage: Stage) {
-    return stage.stageName;
-  }
-
   selectView(view) {
     this.view = view;
+    if(this.view == 'sequences') {
+      if(this.currentSequence)
+        this.loadTraces(this.currentSequence);
+    } else if(this.view == 'services') {
+      if(this.currentRoot)
+        this.loadTraces(this.currentRoot);
+    }
   }
 
   filterEvents(event: DtCheckboxChange<string>, eventType: string): void {
@@ -318,35 +365,38 @@ export class ProjectBoardComponent implements OnInit, OnDestroy {
       return roots.filter(r => this.filterEventTypes.indexOf(r.type) == -1);
   }
 
-  selectStage($event, stage: Stage, filterType?: string) {
-    this.problemFilterEventButton?.deselect();
-    this.evaluationFilterEventButton?.deselect();
-    this.approvalFilterEventButton?.deselect();
-
-    this.selectedStage = stage;
-    this.filterEventType = filterType;
-    $event.stopPropagation();
+  filtersChanged(event) {
+    this._seqFilters = event.filters;
+    this.sequenceFilters = this._seqFilters.reduce((filters, filter) => {
+      if(!filters[filter[0].name])
+        filters[filter[0].name] = [];
+      filters[filter[0].name].push(filter[1].value);
+      return filters;
+    }, {});
   }
 
-  selectFilterEvent($event) {
-    if($event.isUserInput)
-      this.filterEventType = $event.source.selected ? $event.value : null;
-  }
-
-  countOpenApprovals(openApprovals: Trace[], project: Project, stage: Stage, service?: Service) {
-    return this.getOpenApprovals(openApprovals, project, stage, service).length;
-  }
-
-  getOpenApprovals(openApprovals: Trace[], project: Project, stage: Stage, service?: Service) {
-    return openApprovals.filter(approval => approval.data.project == project.projectName && approval.data.stage == stage.stageName && (!service || approval.data.service == service.serviceName));
-  }
-
-  findFailedRootEvent(failedRootEvents: Root[], service: Service) {
-    return failedRootEvents.find(root => root.data.service == service.serviceName);
-  }
-
-  findProblemEvent(problemEvents: Root[], service: Service) {
-    return problemEvents.find(root => root?.data.service == service.serviceName);
+  getFilteredSequences(sequences: Root[]) {
+    if(sequences)
+      return sequences.filter(s => {
+        let res = true;
+        Object.keys(this.sequenceFilters||{}).forEach((key) => {
+          switch(key) {
+            case "Service":
+              res = res && this.sequenceFilters[key].includes(s.getService());
+              break;
+            case "Stage":
+              res = res && this.sequenceFilters[key].every(f => s.getStages().includes(f));
+              break;
+            case "Sequence":
+              res = res && this.sequenceFilters[key].includes(s.getShortType());
+              break;
+            case "Status":
+              res = res && this.sequenceFilters[key].includes(s.getStatus());
+              break;
+          }
+        });
+        return res;
+      });
   }
 
   loadIntegrations() {

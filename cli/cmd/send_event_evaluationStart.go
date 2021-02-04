@@ -15,19 +15,15 @@
 package cmd
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
-	"github.com/google/uuid"
 	apimodels "github.com/keptn/go-utils/pkg/api/models"
 	apiutils "github.com/keptn/go-utils/pkg/api/utils"
-	keptnevents "github.com/keptn/go-utils/pkg/lib"
 	"github.com/keptn/keptn/cli/pkg/credentialmanager"
 	"github.com/keptn/keptn/cli/pkg/logging"
 	"github.com/spf13/cobra"
@@ -41,6 +37,9 @@ type evaluationStartStruct struct {
 	Start     *string            `json:"start"`
 	End       *string            `json:"end"`
 	Labels    *map[string]string `json:"labels"`
+	Watch     *bool
+	WatchTime *int
+	Output    *string
 }
 
 var evaluationStart evaluationStartStruct
@@ -92,34 +91,6 @@ keptn send event start-evaluation --project=sockshop --stage=hardening --service
 			return fmt.Errorf("Start and end time of evaluation time frame not set: %s", err.Error())
 		}
 
-		startEvaluationEventData := keptnevents.StartEvaluationEventData{
-			Project:      *evaluationStart.Project,
-			Service:      *evaluationStart.Service,
-			Stage:        *evaluationStart.Stage,
-			TestStrategy: "manual",
-			Start:        start.Format("2006-01-02T15:04:05.000Z"),
-			End:          end.Format("2006-01-02T15:04:05.000Z"),
-			Labels:       *evaluationStart.Labels,
-		}
-
-		keptnContext := uuid.New().String()
-		source, _ := url.Parse("https://github.com/keptn/keptn/cli#configuration-change")
-
-		sdkEvent := cloudevents.NewEvent()
-		sdkEvent.SetID(uuid.New().String())
-		sdkEvent.SetType(keptnevents.StartEvaluationEventType)
-		sdkEvent.SetSource(source.String())
-		sdkEvent.SetDataContentType(cloudevents.ApplicationJSON)
-		sdkEvent.SetExtension("shkeptncontext", keptnContext)
-		sdkEvent.SetData(cloudevents.ApplicationJSON, startEvaluationEventData)
-
-		eventByte, err := sdkEvent.MarshalJSON()
-		if err != nil {
-			return fmt.Errorf("Failed to marshal cloud event. %s", err.Error())
-		}
-
-		apiEvent := apimodels.KeptnContextExtendedCE{}
-		err = json.Unmarshal(eventByte, &apiEvent)
 		if err != nil {
 			return fmt.Errorf("Failed to map cloud event to API event model. %s", err.Error())
 		}
@@ -147,6 +118,16 @@ keptn send event start-evaluation --project=sockshop --stage=hardening --service
 			if response == nil {
 				logging.PrintLog("No event returned", logging.QuietLevel)
 				return nil
+			}
+
+			if *evaluationStart.Watch {
+				eventHandler := apiutils.NewAuthenticatedEventHandler(endPoint.String(), apiToken, "x-token", nil, endPoint.Scheme)
+				filter := apiutils.EventFilter{
+					KeptnContext: *response.KeptnContext,
+					Project:      *evaluationStart.Project,
+				}
+				watcher := NewDefaultWatcher(eventHandler, filter, time.Duration(*evaluationStart.WatchTime)*time.Second)
+				PrintEventWatcher(watcher, *evaluationStart.Output, os.Stdout)
 			}
 
 			return nil
@@ -266,4 +247,8 @@ func init() {
 	evaluationStart.End = evaluationStartCmd.Flags().StringP("end", "", "",
 		"The end point to which the evaluation data should be gathered in UTC (can not be used together with --timeframe)")
 	evaluationStart.Labels = evaluationStartCmd.Flags().StringToStringP("labels", "l", nil, "Additional labels to be provided to the lighthouse service")
+
+	evaluationStart.Output = AddOutputFormatFlag(evaluationStartCmd)
+	evaluationStart.Watch = AddWatchFlag(evaluationStartCmd)
+	evaluationStart.WatchTime = AddWatchTimeFlag(evaluationStartCmd)
 }

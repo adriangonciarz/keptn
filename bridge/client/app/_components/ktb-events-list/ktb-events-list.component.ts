@@ -3,6 +3,7 @@ import {Trace} from "../../_models/trace";
 import DateUtil from "../../_utils/date.utils";
 import {Router} from "@angular/router";
 import {Location} from "@angular/common";
+import {EventTypes} from "../../_models/event-types";
 
 @Component({
   selector: 'ktb-events-list',
@@ -76,5 +77,4 @@ export class KtbEventsListComponent implements OnInit {
   isInvalidated(event) {
     return !!this.events.find(e => e.isEvaluationInvalidation() && e.triggeredid == event.id);
   }
-
 }

@@ -1,11 +1,12 @@
 package main
 
 import (
-	keptnv2 "github.com/keptn/go-utils/pkg/lib/v0_2_0"
 	"log"
 	"net/url"
 	"reflect"
 	"testing"
+
+	keptnv2 "github.com/keptn/go-utils/pkg/lib/v0_2_0"
 )
 
 var serviceURLTests = []struct {
@@ -33,10 +34,7 @@ func deploymentFinishedEventInitHelper(project, service, stage, deploymentStrate
 			Service: service,
 			Stage:   stage,
 		},
-		Deployment: struct {
-			DeploymentURIsLocal  []string `json:"deploymentURIsLocal,omitempty"`
-			DeploymentURIsPublic []string `json:"deploymentURIsPublic,omitempty"`
-		}{
+		Deployment: keptnv2.TestTriggeredDeploymentDetails{
 			DeploymentURIsLocal:  []string{deploymentURILocal},
 			DeploymentURIsPublic: []string{deploymentURIPublic},
 		},

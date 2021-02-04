@@ -11,9 +11,12 @@ import {ProblemStates} from "./problem-states";
 const DEFAULT_ICON = "information";
 
 class Trace {
+  traces: Trace[] = [];
+
   id: string;
   shkeptncontext: string;
   triggeredid: string;
+  finished: boolean;
   source: string;
   time: Date;
   type: string;
@@ -49,11 +52,13 @@ class Trace {
       shkeptncontext: string;
       token: string;
     };
-    valuesCanary: {
-      image: string;
+    configurationChange: {
+      values: {
+        image: string
+      }
     };
 
-    evaluationdetails: {
+    evaluation: {
       comparedEvents: string[];
       indicatorResults: any;
       result: string;
@@ -110,7 +115,7 @@ class Trace {
   isFailedEvaluation() {
     let result: string = null;
     if(this.data) {
-      if(this.type === EventTypes.EVALUATION_DONE && this.isFailed()) {
+      if(this.type === EventTypes.EVALUATION_FINISHED && this.isFailed()) {
         result = this.data.stage;
       }
     }
@@ -120,7 +125,7 @@ class Trace {
   isWarning(): string {
     let result: string = null;
     if(this.data) {
-      if(this.type === EventTypes.EVALUATION_DONE && this.data.result == ResultTypes.WARNING) {
+      if(this.type === EventTypes.EVALUATION_FINISHED && this.data.result == ResultTypes.WARNING) {
         result = this.data.stage;
       }
     }
@@ -157,6 +162,16 @@ class Trace {
     return this.type === EventTypes.APPROVAL_TRIGGERED ? this.data.stage : null;
   }
 
+  public isApprovalPending(): boolean {
+    let pending = true;
+    for (let i = 0; i < this.traces.length && pending; ++i) {
+      if (this.traces[i].isApprovalFinished()) {
+        pending = false;
+      }
+    }
+    return pending;
+  }
+
   private isApprovalFinished(): boolean {
     return this.type === EventTypes.APPROVAL_FINISHED;
   }
@@ -174,11 +189,11 @@ class Trace {
   }
 
   public isDeployment(): string {
-    return this.type === EventTypes.DEPLOYMENT_FINISHED ? this.data.stage : null;
+    return this.type === EventTypes.DEPLOYMENT_TRIGGERED ? this.data.stage : null;
   }
 
   public isEvaluation(): string {
-    return this.type === EventTypes.START_EVALUATION ? this.data.stage : null;
+    return this.type === EventTypes.EVALUATION_TRIGGERED ? this.data.stage : null;
   }
 
   public isEvaluationInvalidation(): boolean {
@@ -195,16 +210,27 @@ class Trace {
       if(this.isProblem() && this.isProblemResolvedOrClosed()) {
         this.label = EVENT_LABELS[EventTypes.PROBLEM_RESOLVED];
       } else if(this.isApprovalFinished()) {
-        this.label = EVENT_LABELS[EventTypes.APPROVAL_FINISHED][this.data.approval?.result] || this.type;
+        this.label = EVENT_LABELS[EventTypes.APPROVAL_FINISHED][this.data.approval?.result] || this.getShortType();
       } else {
-        this.label = EVENT_LABELS[this.type] || this.type;
+        this.label = EVENT_LABELS[this.type] || this.getShortType();
       }
     }
 
     return this.label;
   }
 
+  getShortType(): string {
+    return this.type.split(".").slice(3, -1).join(".");
+  }
+
   getIcon() {
+    if(!this.isFinished())
+      return "idle";
+
+    return this.getIconType();
+  }
+
+  getIconType(): string {
     if(!this.icon) {
       if(this.isApprovalFinished()) {
         this.icon = EVENT_ICONS[EventTypes.APPROVAL_FINISHED][this.data.approval?.result] || DEFAULT_ICON;
@@ -221,8 +247,8 @@ class Trace {
         this.image = [this.data.image.split("/").pop(), this.data.tag].join(":");
       else if(this.data.image)
         this.image = this.data.image.split("/").pop();
-      else if(this.data.valuesCanary)
-        this.image = this.data.valuesCanary.image.split("/").pop();
+      else if(this.data.configurationChange?.values)
+        this.image = this.data.configurationChange.values.image?.split("/").pop();
     }
 
     return this.image;
@@ -251,7 +277,25 @@ class Trace {
     this.heatmapLabel = label;
   }
 
+  isFinished() {
+    if(!this.finished) {
+      if(!this.traces || this.traces.length == 0)
+        this.finished = this.type.includes(".finished");
+      else
+        this.finished = this.traces.some(t => t.type.includes(".finished"));
+    }
+
+    return this.finished;
+  }
+
+  getFinishedEvent() {
+    return this.traces.find(t => t.type.includes(".finished"));
+  }
+
   static fromJSON(data: any) {
+    if(data instanceof Trace)
+      return data;
+
     const plainEvent = JSON.parse(JSON.stringify(data));
     return Object.assign(new this, data, { plainEvent });
   }

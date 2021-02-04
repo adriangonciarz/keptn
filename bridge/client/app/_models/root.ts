@@ -3,7 +3,7 @@ import {EventTypes} from "./event-types";
 import {Stage} from "./stage";
 
 export class Root extends Trace {
-  traces: Trace[];
+  traces: Trace[] = [];
 
   isFaulty(): string {
     return this.traces.reduce((result: string, trace: Trace) => trace.isFaulty() ? trace.data.stage : result, null);
@@ -46,12 +46,32 @@ export class Root extends Trace {
     }, null);
   }
 
-  isApproval(): string {
-    return this.getLastTrace().isApproval();
+  hasPendingApproval(stage: string): boolean {
+    const tracesOfStage = this.getTracesOfStage(stage);
+    let pending = undefined;
+
+    for(let i = 0; i < tracesOfStage.length && pending === undefined; ++i){
+      if(tracesOfStage[i].isApproval()){
+        pending = tracesOfStage[i].isApprovalPending();
+      }
+    }
+    return pending === undefined ? false : pending;
+  }
+
+  getPendingApprovals(): Trace[] {
+    return this.traces.filter(trace => trace.isApproval() && trace.isApprovalPending());
   }
 
   getLastTrace(): Trace {
     return this.traces ? this.traces[this.traces.length - 1] : null;
+  }
+
+  getTracesOfStage(stage: string): Trace[] {
+    return this.traces?.filter(trace => trace.data.stage === stage);
+  }
+
+  getFirstTraceOfStage(stage: string): Trace {
+    return this.getTracesOfStage(stage)?.[0];
   }
 
   getStages(): String[] {
@@ -78,7 +98,7 @@ export class Root extends Trace {
   }
 
   getEvaluation(stage: Stage): Trace {
-    return this.traces.find(t => t.type == EventTypes.EVALUATION_DONE && t.data.stage == stage.stageName);
+    return this.traces.find(t => t.type == EventTypes.EVALUATION_FINISHED && t.data.stage == stage.stageName);
   }
 
   getDeploymentDetails(stage: Stage): Trace {
@@ -94,6 +114,23 @@ export class Root extends Trace {
         result[result.length-1].traces = [...result[result.length-1].traces||[], trace];
       return result;
     }, []);
+  }
+
+  isFinished() {
+    return this.getLastTrace()?.isFinished();
+  }
+
+  getSequenceName() {
+    return this.type;
+  }
+
+  getStatus() {
+    if(this.isFaulty())
+      return "failed";
+    else if(this.isFinished())
+      return "succeeded";
+    else
+      return "active";
   }
 
   static fromJSON(data: any) {

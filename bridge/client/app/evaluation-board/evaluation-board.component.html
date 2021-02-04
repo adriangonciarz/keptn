@@ -34,14 +34,14 @@
         </div>
       </div>
     </dt-info-group-title>
-    <p class="m-0" *ngIf="root.data.valuesCanary"><span class="bold">Artifact: </span><span [textContent]="root.data.valuesCanary.image"></span></p>
+    <p class="m-0" *ngIf="root.data.configurationChange?.values"><span class="bold">Artifact: </span><span [textContent]="root.data.configurationChange.values.image"></span></p>
     <p class="m-0 mb-3"><span class="bold">Keptn ID: </span><span [textContent]="root.shkeptncontext"></span></p>
   </dt-info-group>
   <div *ngFor="let evaluation of evaluations;">
     <p><span class="bold">Stage: </span><span [textContent]="evaluation.data.stage"></span></p>
     <ktb-event-item [event]="evaluation">
       <ktb-event-item-detail>
-        <ktb-evaluation-details *ngIf="evaluation.data.evaluationdetails" [evaluationData]="evaluation"></ktb-evaluation-details>
+        <ktb-evaluation-details *ngIf="evaluation.data.evaluation" [evaluationData]="evaluation"></ktb-evaluation-details>
       </ktb-event-item-detail>
     </ktb-event-item>
   </div>

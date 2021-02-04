@@ -1,9 +1,16 @@
 #!/bin/bash
 
 VERSION=$1
+IMAGE_TAG=$2
+
 if [ -z "$VERSION" ]; then
   echo "No Version set, exiting..."
   exit 1
+fi
+
+if [ -z "$IMAGE_TAG" ]; then
+  echo "No Image Tag set, defaulting to version"
+  IMAGE_TAG=$VERSION
 fi
 
 BASE_PATH=installer/manifests
@@ -12,7 +19,7 @@ helm repo add nats https://nats-io.github.io/k8s/helm/charts/
 helm dependency build ${BASE_PATH}/keptn/charts/control-plane
 
 # replace "appVersion: latest" with "appVersion: $VERSION" in all Chart.yaml files
-find -name Chart.yaml -exec sed -i -- "s/appVersion: latest/appVersion: ${VERSION}/g" {} \;
+find -name Chart.yaml -exec sed -i -- "s/appVersion: latest/appVersion: ${IMAGE_TAG}/g" {} \;
 find -name Chart.yaml -exec sed -i -- "s/version: latest/version: ${VERSION}/g" {} \;
 
 helm package ${BASE_PATH}/keptn --app-version $VERSION --version $VERSION
@@ -22,10 +29,10 @@ if [ $? -ne 0 ]; then
 fi
 
 mkdir keptn-charts/
-mv keptn-${VERSION}.tgz keptn-charts/
+mv keptn-${VERSION}.tgz keptn-charts/keptn-installer-${VERSION}.tgz
 
 # verify the chart
-helm template --debug keptn-charts/keptn-${VERSION}.tgz
+helm template --debug keptn-charts/keptn-installer-${VERSION}.tgz
 
 if [ $? -ne 0 ]; then
   echo "::error Helm Chart has templating errors - exiting"
@@ -48,6 +55,6 @@ fi
 
 
 echo "Generated files:"
-echo " - keptn-charts/keptn-${VERSION}.tgz"
+echo " - keptn-charts/keptn-installer-${VERSION}.tgz"
 
 

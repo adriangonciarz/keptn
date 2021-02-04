@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -103,7 +104,7 @@ keptn auth --skip-namespace-listing # To skip the listing of namespaces and use 
 			}
 
 			if endPointErr := checkEndPointStatus(*authParams.endPoint); endPointErr != nil {
-				return fmt.Errorf("Authentication was unsucessful: %s"+endPointErrorReasons,
+				return fmt.Errorf("Authentication was unsuccessful: %s"+endPointErrorReasons,
 					endPointErr)
 			}
 
@@ -224,7 +225,7 @@ func authenticate(endPoint string, apiToken string) error {
 func smartKeptnCLIAuth() (string, error) {
 	keptnInstallations, err := keptnutils.GetKeptnManagedNamespace(false)
 	if err != nil {
-		return "", err
+		return "", errors.New("Could not get current Kubernetes context from KUBECONFIG: " + err.Error())
 	}
 
 	if len(keptnInstallations) > 1 {
@@ -246,6 +247,8 @@ func smartKeptnCLIAuth() (string, error) {
 			return "", fmt.Errorf("Please select the correct keptn installation")
 		}
 		return keptnInstallations[inp], nil
+	} else if len(keptnInstallations) == 0 {
+		return "", errors.New("We haven't found any Keptn Installation, Please follow the upgrade guide and patch the namespace with the annotation & label 'keptn.sh/managed-by: keptn'")
 	}
 	return keptnInstallations[0], nil
 }

@@ -99,8 +99,10 @@ export class ApiService {
       .get<ServiceResult>(url);
   }
 
-  public getRoots(projectName: string, serviceName: string, fromTime?: string): Observable<HttpResponse<EventResult>> {
-    let url = `${this._baseUrl}/mongodb-datastore/event?root=true&pageSize=20&project=${projectName}&service=${serviceName}`;
+  public getRoots(projectName: string, serviceName?: string, fromTime?: string): Observable<HttpResponse<EventResult>> {
+    let url = `${this._baseUrl}/mongodb-datastore/event?root=true&pageSize=20&project=${projectName}`;
+    if(serviceName)
+      url += `&service=${serviceName}`;
     if(fromTime)
       url += `&fromTime=${fromTime}`;
     return this.http
@@ -118,7 +120,7 @@ export class ApiService {
   }
 
   public getEvaluationResults(projectName: string, serviceName: string, stageName: string, source: string, fromTime?: string) {
-    let url = `${this._baseUrl}/mongodb-datastore/event/type/sh.keptn.events.evaluation-done?filter=data.project:${projectName}%20AND%20data.service:${serviceName}%20AND%20data.stage:${stageName}&excludeInvalidated=true&limit=50`;
+    let url = `${this._baseUrl}/mongodb-datastore/event/type/${EventTypes.EVALUATION_FINISHED}?filter=data.project:${projectName}%20AND%20data.service:${serviceName}%20AND%20data.stage:${stageName}&excludeInvalidated=true&limit=50`;
     if(fromTime)
       url += `&fromTime=${fromTime}`;
     return this.http

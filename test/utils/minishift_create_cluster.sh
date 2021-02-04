@@ -16,15 +16,7 @@ cat $USSH/ci_id_rsa.pub >> /root/.ssh/authorized_keys
 chmod g-rw,o-rw /root/.ssh /root/.ssh/* $USSH/* $USSH
 EOF
 
-# download and install minishift
-MINISHIFT_VERSION=1.34.2
-MINISHIFT_FILENAME=minishift-${MINISHIFT_VERSION}-linux-amd64
-
-curl -Lo minishift.tgz https://github.com/minishift/minishift/releases/download/v${MINISHIFT_VERSION}/${MINISHIFT_FILENAME}.tgz
-tar zxvf minishift.tgz ${MINISHIFT_FILENAME}/minishift
-sudo mv ${MINISHIFT_FILENAME}/minishift /usr/local/bin/
-
-# make sure you have a profile is set correctly, e.g. knative
+# make sure you have a profile is set correctly
 minishift profile set keptn-dev
 # minimum memory required for the minishift VM
 minishift config set memory 4GB
@@ -69,3 +61,6 @@ echo "Setting policies"
 oc adm policy --as system:admin add-cluster-role-to-user cluster-admin admin
 oc adm policy  add-cluster-role-to-user cluster-admin system:serviceaccount:default:default
 oc adm policy  add-cluster-role-to-user cluster-admin system:serviceaccount:kube-system:default
+
+# wait a little bit to ensure the cluster is ready
+sleep 30
